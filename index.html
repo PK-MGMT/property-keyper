@@ -936,6 +936,25 @@ function showSettings(){
       </div>
 
       <div class="settings-card">
+        <div class="settings-card-header"><i class="fas fa-broom"></i> Cleaning costs</div>
+        <div class="settings-card-body">
+          <p style="font-size:12px;color:var(--text-3);margin-bottom:14px">Set the cost per clean per platform. Used to calculate the cleaning section in the management report.</p>
+          <div style="display:grid;grid-template-columns:1fr 130px;gap:8px;margin-bottom:6px">
+            <span class="expense-col-label">Platform</span>
+            <span class="expense-col-label">Cost per clean (£)</span>
+          </div>
+          ${['Airbnb','Booking.com','Direct Bookings','VRBO','MisterB&B','Other'].map(pl=>{
+            const key = 'clean_'+pl.replace(/[^a-z]/gi,'_').toLowerCase();
+            const val = p.cleanRates?.[key] ?? p.cleanRates?.default ?? 85;
+            return `<div style="display:grid;grid-template-columns:1fr 130px;gap:8px;margin-bottom:7px;align-items:center">
+              <span style="font-size:13px">${pl}</span>
+              <input type="number" id="s-${key}" value="${val}" min="0" step="0.01" style="font-family:var(--font);font-size:13px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);outline:none"/>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="settings-card">
         <div class="settings-card-header"><i class="fas fa-receipt"></i> Standing expenses (deducted monthly)</div>
         <div class="settings-card-body">
           <p style="font-size:12px;color:var(--text-3);margin-bottom:14px">Added as deductions in the client report each month with bookings. Wi-Fi, insurance, maintenance, etc.</p>
@@ -982,6 +1001,13 @@ function saveSettings(){
   p.city=document.getElementById('s-city').value.trim();
   p.postcode=document.getElementById('s-postcode').value.trim();
   p.fee=parseFloat(document.getElementById('s-fee').value)||15;
+  // Save cleaning rates per platform
+  p.cleanRates={};
+  ['Airbnb','Booking.com','Direct Bookings','VRBO','MisterB&B','Other'].forEach(pl=>{
+    const key='clean_'+pl.replace(/[^a-z]/gi,'_').toLowerCase();
+    const el=document.getElementById(`s-${key}`);
+    if(el) p.cleanRates[key]=parseFloat(el.value)||0;
+  });
   p.expenses=[];
   document.querySelectorAll('.expense-row').forEach(row=>{
     const id=row.id.replace('exrow-','');
@@ -1323,37 +1349,53 @@ function generateReport(){
   const email=document.getElementById('exp-email').value.trim();
   const d=calcMonth(p.id,month,year);
   const fee=p.fee||15;
-  const exps=p.expenses||[];
   const monthLabel=MFULL[month]+' '+year;
   const addr=[p.address,p.city,p.postcode].filter(Boolean).join(', ');
-  const afterCleaning=d.payout-d.cleaning;
-  const finalPayout=afterCleaning-d.expTotal;
 
-  // Platform breakdown
-  const platNames=['Airbnb','Booking.com','Direct Bookings','Other'];
-  const platRows=platNames.map(pl=>{
-    const isOther=pl==='Other';
-    const ents=d.entries.filter(e=>isOther?!platNames.slice(0,3).includes(e.platform):e.platform===pl);
-    const inc=ents.reduce((s,e)=>s+e.income,0);
-    const label=pl==='Direct Bookings'?'Direct booking':pl;
-    return `<tr><td>${label} booking${pl!=='Other'?'s':''}</td><td class="r">${inc>0?'£'+fmtR(inc):''}</td></tr>`;
+  // ── Page 1: Income by platform ──
+  // Group income entries by platform
+  const incByPlat={};
+  d.incEntries.forEach(e=>{
+    const pl = e.platform.startsWith('__') ? (INCOME_CATS[e.category]?.label||'Other') : e.platform;
+    incByPlat[pl]=(incByPlat[pl]||0)+e.income;
+  });
+  const platRows = Object.entries(incByPlat).map(([pl,amt])=>
+    `<tr><td>${pl}</td><td class="r">£${fmtR(amt)}</td></tr>`
+  ).join('') || `<tr><td colspan="2" style="color:#888">No income entries for this month</td></tr>`;
+
+  // ── Page 1: Cleaning breakdown by platform ──
+  const cleanPlatforms=['Airbnb','Booking.com','Direct Bookings','VRBO','MisterB&B','Other'];
+  let totalCleanCost=0;
+  const cleanRows = cleanPlatforms.map(pl=>{
+    const key='clean_'+pl.replace(/[^a-z]/gi,'_').toLowerCase();
+    const costPerClean = p.cleanRates?.[key] ?? 85;
+    // Count stays for this platform
+    const plStays = pl==='Other'
+      ? d.incEntries.filter(e=>!cleanPlatforms.slice(0,-1).includes(e.platform)).reduce((s,e)=>s+e.stays,0)
+      : d.incEntries.filter(e=>e.platform===pl).reduce((s,e)=>s+e.stays,0);
+    const total = plStays * costPerClean;
+    totalCleanCost += total;
+    return `<tr${plStays===0?' style="opacity:0.5"':''}><td>${pl}</td><td class="r">${plStays}</td><td class="r">£${fmtR(costPerClean)}</td><td class="r">${total>0?'£'+fmtR(total):'£0.00'}</td></tr>`;
   }).join('');
+  // Collect all manual expense lines
+  const allExpLines=[];
+  d.expEntries.forEach(e=>{
+    (e.expenseLines||[]).filter(x=>x.amt>0).forEach(x=>{
+      allExpLines.push({name: x.catLabel||x.name||'Expense', detail: x.sub||'', amt: x.amt});
+    });
+  });
+  // Add standing (recurring) expenses
+  (p.expenses||[]).filter(ex=>ex.qty*ex.unitCost>0&&d.entries.length>0).forEach(ex=>{
+    allExpLines.push({name: ex.name, detail: `${ex.qty} × £${fmtR(ex.unitCost)}`, amt: ex.qty*ex.unitCost});
+  });
 
-  // Cleaning breakdown
-  const cleanNames=['Airbnb','Booking.com','Direct Bookings','Other','Landlord Stay'];
-  const cleanRows=cleanNames.map(pl=>{
-    const isOther=pl==='Other';
-    const ents=d.entries.filter(e=>isOther?!['Airbnb','Booking.com','Direct Bookings','Landlord Stay'].includes(e.platform):e.platform===pl);
-    const stays=ents.reduce((s,e)=>s+e.stays,0);
-    const totalC=ents.reduce((s,e)=>s+e.cleaning,0);
-    const perStay=stays>0?totalC/stays:85;
-    const label=pl==='Direct Bookings'?'Direct booking':pl;
-    return `<tr><td>${label}</td><td class="r">${stays}</td><td class="r">£${fmtR(perStay)}</td><td class="r">£${fmtR(totalC)}</td></tr>`;
-  }).join('');
+  const expRows = allExpLines.map(x=>
+    `<tr><td>${x.name}</td><td class="r" style="color:#888">${x.detail}</td><td class="r">£${fmtR(x.amt)}</td></tr>`
+  ).join('') || `<tr><td colspan="3" style="color:#888">No expense entries for this month</td></tr>`;
 
-  // Deduction rows (min 5)
-  let deductRows=exps.map(ex=>`<tr><td>${ex.name}</td><td class="r">${ex.qty}</td><td class="r">£${fmtR(ex.unitCost)}</td><td class="r">£${fmtR(ex.qty*ex.unitCost)}</td></tr>`);
-  while(deductRows.length<5)deductRows.push('<tr><td></td><td class="r">0</td><td class="r">£0.00</td><td class="r">£0.00</td></tr>');
+  const totalExpenses = allExpLines.reduce((s,x)=>s+x.amt, 0);
+  const grossPayout = d.income - d.commission;
+  const finalPayout = grossPayout - totalExpenses;
 
   const contactHtml=(phone||email)?`<div class="rcontact"><strong>Questions about this report?</strong><br>${phone?phone+'<br>':''}${email}</div>`:'';
 
@@ -1364,7 +1406,7 @@ function generateReport(){
     <div class="report-meta"><strong>${p.name}</strong> &nbsp;·&nbsp; ${addr}</div>
 
     <table class="rtable">
-      <thead><tr><th>Platform</th><th class="r">Payout amount</th></tr></thead>
+      <thead><tr><th>Income</th><th class="r">Amount</th></tr></thead>
       <tbody>
         ${platRows}
         <tr class="total-r"><td>Total income</td><td class="r">£ ${fmtR(d.income)}</td></tr>
@@ -1375,7 +1417,15 @@ function generateReport(){
       <thead><tr><th>Cleaning fee (included in payout, paid by guests)</th><th class="r">Stays</th><th class="r">Cost per stay</th><th class="r">Total</th></tr></thead>
       <tbody>
         ${cleanRows}
-        <tr class="total-r"><td>Total cleaning</td><td></td><td></td><td class="r">£ ${fmtR(d.cleaning)}</td></tr>
+        <tr class="total-r"><td>Total cleaning</td><td></td><td></td><td class="r">£ ${fmtR(totalCleanCost)}</td></tr>
+      </tbody>
+    </table>
+
+    <table class="rtable">
+      <thead><tr><th>Additional expenses</th><th class="r">Detail</th><th class="r">Amount</th></tr></thead>
+      <tbody>
+        ${expRows}
+        <tr class="total-r"><td>Total expenses</td><td></td><td class="r">£ ${fmtR(totalExpenses)}</td></tr>
       </tbody>
     </table>
 
@@ -1386,32 +1436,28 @@ function generateReport(){
     </table>
 
     <table class="rsummary">
-      <tr class="hl"><td>Final total after cleaning &amp; management fee</td><td class="r">£ ${fmtR(afterCleaning)}</td></tr>
+      <tr><td>Gross payout (income − commission)</td><td class="r">£ ${fmtR(grossPayout)}</td></tr>
+      <tr class="hl"><td>Final payout (after expenses)</td><td class="r">£ ${fmtR(finalPayout)}</td></tr>
     </table>
 
-    <p class="rnote">See next page for the Deductions report. Your final payout after any deductions is shown on page 2.</p>
+    <p class="rnote">See next page for a full summary breakdown.</p>
   </div>
 
   <div class="report-page">
     <div class="report-logo"><span>Property Keyper</span>Management Portfolio</div>
-    <div class="report-heading"><span>Deductions Report</span>${monthLabel}</div>
+    <div class="report-heading"><span>Payout Summary</span>${monthLabel}</div>
     <div class="report-meta"><strong>${p.name}</strong> &nbsp;·&nbsp; ${addr}</div>
 
-    <table class="rtable">
-      <thead><tr><th>Deduction</th><th class="r">Qty</th><th class="r">Unit cost</th><th class="r">Total</th></tr></thead>
-      <tbody>
-        ${deductRows.join('')}
-        <tr class="total-r"><td>Total deductions</td><td></td><td></td><td class="r">£ ${fmtR(d.expTotal)}</td></tr>
-      </tbody>
-    </table>
-
     <table class="rsummary">
-      <tr><td>Before deductions</td><td class="r">£ ${fmtR(afterCleaning)}</td></tr>
-      <tr class="hl"><td>After deductions</td><td class="r">£ ${fmtR(finalPayout)}</td></tr>
+      <tr><td>Total income</td><td class="r">£ ${fmtR(d.income)}</td></tr>
+      <tr><td>Management commission (${fee}%)</td><td class="r">− £ ${fmtR(d.commission)}</td></tr>
+      <tr><td>Cleaning costs</td><td class="r">− £ ${fmtR(totalCleanCost)}</td></tr>
+      <tr><td>Other expenses</td><td class="r">− £ ${fmtR(totalExpenses)}</td></tr>
+      <tr class="hl"><td>Net payout to client</td><td class="r">£ ${fmtR(grossPayout - totalCleanCost - totalExpenses)}</td></tr>
     </table>
 
     <table class="rfinal">
-      <tr><td>Final total payout</td><td class="r">£ ${fmtR(finalPayout)}</td></tr>
+      <tr><td>Final total payout</td><td class="r">£ ${fmtR(grossPayout - totalCleanCost - totalExpenses)}</td></tr>
     </table>
 
     ${contactHtml}
