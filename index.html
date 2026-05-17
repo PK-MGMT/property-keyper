@@ -308,6 +308,19 @@
         </div>
       </div>
     </div>
+    <div class="modal-section">
+      <div class="modal-section-title">Management</div>
+      <div class="grid2">
+        <div class="fg">
+          <label>Management fee (%)</label>
+          <input type="number" id="p-fee" value="15" min="0" max="100" step="0.5" />
+        </div>
+        <div class="fg">
+          <label>Cleaning cost per stay (£)</label>
+          <input type="number" id="p-clean" value="85" min="0" step="0.01" />
+        </div>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closePropModal()">Cancel</button>
       <button class="btn btn-dark" onclick="saveProperty()">Onboard property</button>
@@ -936,21 +949,9 @@ function showSettings(){
       </div>
 
       <div class="settings-card">
-        <div class="settings-card-header"><i class="fas fa-broom"></i> Cleaning costs</div>
-        <div class="settings-card-body">
-          <p style="font-size:12px;color:var(--text-3);margin-bottom:14px">Set the cost per clean per platform. Used to calculate the cleaning section in the management report.</p>
-          <div style="display:grid;grid-template-columns:1fr 130px;gap:8px;margin-bottom:6px">
-            <span class="expense-col-label">Platform</span>
-            <span class="expense-col-label">Cost per clean (£)</span>
-          </div>
-          ${['Airbnb','Booking.com','Direct Bookings','VRBO','MisterB&B','Other'].map(pl=>{
-            const key = 'clean_'+pl.replace(/[^a-z]/gi,'_').toLowerCase();
-            const val = p.cleanRates?.[key] ?? p.cleanRates?.default ?? 85;
-            return `<div style="display:grid;grid-template-columns:1fr 130px;gap:8px;margin-bottom:7px;align-items:center">
-              <span style="font-size:13px">${pl}</span>
-              <input type="number" id="s-${key}" value="${val}" min="0" step="0.01" style="font-family:var(--font);font-size:13px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);outline:none"/>
-            </div>`;
-          }).join('')}
+        <div class="settings-card-header"><i class="fas fa-broom"></i> Cleaning cost</div>
+        <div class="settings-card-body" style="max-width:240px">
+          <div class="fg"><label>Cost per clean (£)</label><input type="number" id="s-clean" value="${p.cleanRate||85}" min="0" step="0.01"/></div>
         </div>
       </div>
 
@@ -1001,6 +1002,7 @@ function saveSettings(){
   p.city=document.getElementById('s-city').value.trim();
   p.postcode=document.getElementById('s-postcode').value.trim();
   p.fee=parseFloat(document.getElementById('s-fee').value)||15;
+  p.cleanRate=parseFloat(document.getElementById('s-clean').value)||85;
   // Save cleaning rates per platform
   p.cleanRates={};
   ['Airbnb','Booking.com','Direct Bookings','VRBO','MisterB&B','Other'].forEach(pl=>{
@@ -1053,11 +1055,20 @@ function openAddProperty(){document.getElementById('prop-modal').classList.add('
 function closePropModal(){document.getElementById('prop-modal').classList.remove('open');}
 function saveProperty(){
   const name=document.getElementById('p-name').value.trim();if(!name)return;
-  const p={id:uid(),name,address:document.getElementById('p-address').value.trim(),city:document.getElementById('p-city').value.trim(),postcode:document.getElementById('p-postcode').value.trim(),fee:15,expenses:[{name:'Wi-Fi',qty:1,unitCost:29.24}]};
+  const p={
+    id:uid(),name,
+    address:document.getElementById('p-address').value.trim(),
+    city:document.getElementById('p-city').value.trim(),
+    postcode:document.getElementById('p-postcode').value.trim(),
+    fee:parseFloat(document.getElementById('p-fee').value)||15,
+    cleanRate:parseFloat(document.getElementById('p-clean').value)||85,
+    expenses:[{name:'Wi-Fi',qty:1,unitCost:29.24}]
+  };
   S.properties.push(p);
   ['p-name','p-address','p-city','p-postcode'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('p-fee').value='15';
+  document.getElementById('p-clean').value='85';
   save();
-  // Push to Supabase
   if(typeof sbRequest==='function'){
     sbRequest('/properties','POST',{id:p.id,data:p}).then(()=>showSyncBadge('Saved'));
   }
@@ -1365,11 +1376,9 @@ function generateReport(){
 
   // ── Page 1: Cleaning breakdown by platform ──
   const cleanPlatforms=['Airbnb','Booking.com','Direct Bookings','VRBO','MisterB&B','Other'];
+  const costPerClean = p.cleanRate || 85;
   let totalCleanCost=0;
   const cleanRows = cleanPlatforms.map(pl=>{
-    const key='clean_'+pl.replace(/[^a-z]/gi,'_').toLowerCase();
-    const costPerClean = p.cleanRates?.[key] ?? 85;
-    // Count stays for this platform
     const plStays = pl==='Other'
       ? d.incEntries.filter(e=>!cleanPlatforms.slice(0,-1).includes(e.platform)).reduce((s,e)=>s+e.stays,0)
       : d.incEntries.filter(e=>e.platform===pl).reduce((s,e)=>s+e.stays,0);
