@@ -504,7 +504,7 @@ function save(){try{localStorage.setItem('hostier_v3',JSON.stringify(S));}catch(
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 function fmt(n){const s=Math.abs(n).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});return(n<0?'-£':'£')+s;}
-function fmtR(n){return n.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtR(n){if(n===undefined||n===null||isNaN(n))return "0.00";return n.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function pc(n){return n>=0?'pos':'neg';}
 function prop(){return S.properties.find(p=>p.id===S.activePropId);}
 
@@ -524,6 +524,7 @@ function calcExpTotal(propId,hasEntries){
 }
 
 function calcMonth(propId,month,year){
+  const _safe=v=>isNaN(v)||v===undefined||v===null?0:v;
   const p=S.properties.find(x=>x.id===propId);
   const entries=S.entries.filter(e=>e.propId===propId&&e.month===month&&e.year===year);
   const incEntries=entries.filter(e=>e.platform!=='__expenses__');
@@ -540,7 +541,7 @@ function calcMonth(propId,month,year){
   const totalExpenses=manualExpenses+standingExpTotal;
   // Income - commission - all expenses = payout = client profit
   const payout=income-commission-totalExpenses;
-  return{income,stays,commission,totalExpenses,standingExpTotal,payout,clientProfit:payout,managerProfit:commission,entries,incEntries,expEntries};
+  return{income:_safe(income),stays:_safe(stays),commission:_safe(commission),totalExpenses:_safe(totalExpenses),standingExpTotal:_safe(standingExpTotal),payout:_safe(payout),clientProfit:_safe(payout),managerProfit:_safe(commission),entries,incEntries,expEntries};
 }
 
 function renderSidebar(){
