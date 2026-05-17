@@ -281,7 +281,7 @@
 <div class="overlay" id="prop-modal">
   <div class="modal">
     <div class="modal-title">Add property</div>
-    <div class="modal-subtitle">Enter the property details to onboard it to Hostier</div>
+    <div class="modal-subtitle">Enter the property details to onboard it to Property Keyper</div>
     <div class="modal-section">
       <div class="modal-section-title">Property name</div>
       <div class="fg">
@@ -989,7 +989,12 @@ function saveSettings(){
     const unitCost=parseFloat(document.getElementById(`ex-cost-${id}`)?.value)||0;
     if(name)p.expenses.push({name,qty,unitCost});
   });
-  save();renderSidebar();renderProp();
+  save();
+  if(typeof sbRequest==='function'){
+    const pp=prop();
+    if(pp) sbRequest('/properties','POST',{id:pp.id,data:pp}).then(()=>showSyncBadge('Saved'));
+  }
+  renderSidebar();renderProp();
 }
 
 /* ── Overview ── */
@@ -1024,7 +1029,12 @@ function saveProperty(){
   const p={id:uid(),name,address:document.getElementById('p-address').value.trim(),city:document.getElementById('p-city').value.trim(),postcode:document.getElementById('p-postcode').value.trim(),fee:15,expenses:[{name:'Wi-Fi',qty:1,unitCost:29.24}]};
   S.properties.push(p);
   ['p-name','p-address','p-city','p-postcode'].forEach(id=>document.getElementById(id).value='');
-  save();closePropModal();renderSidebar();selectProp(p.id);
+  save();
+  // Push to Supabase
+  if(typeof sbRequest==='function'){
+    sbRequest('/properties','POST',{id:p.id,data:p}).then(()=>showSyncBadge('Saved'));
+  }
+  closePropModal();renderSidebar();selectProp(p.id);
 }
 
 /* ── Entry modal ── */
@@ -1277,11 +1287,24 @@ function saveEntry(){
   }
 
   S.activeYear=incYear;
-  save();closeEntryModal();renderYearTabs();renderProp();
+  save();
+  // Push new entries to Supabase
+  if(typeof sbRequest==='function'){
+    S.entries.filter(e=>e.propId===S.activePropId&&e.month===incMonth&&e.year===incYear).slice(-10).forEach(e=>{
+      sbRequest('/entries','POST',{id:e.id,prop_id:e.propId,data:e});
+    });
+    if(expMonth!==undefined){
+      S.entries.filter(e=>e.propId===S.activePropId&&e.month===expMonth&&e.year===expYear&&e.platform==='__expenses__').slice(-3).forEach(e=>{
+        sbRequest('/entries','POST',{id:e.id,prop_id:e.propId,data:e});
+      });
+    }
+    showSyncBadge('Saved');
+  }
+  closeEntryModal();renderYearTabs();renderProp();
 }
 
-function delEntry(id){if(!confirm('Delete this entry?'))return;S.entries=S.entries.filter(e=>e.id!==id);save();renderProp();}
-function deleteProp(id){if(!confirm('Delete this property and all its data?'))return;S.properties=S.properties.filter(p=>p.id!==id);S.entries=S.entries.filter(e=>e.propId!==id);if(S.activePropId===id)S.activePropId=null;save();renderSidebar();showOverview();}
+function delEntry(id){if(!confirm('Delete this entry?'))return;S.entries=S.entries.filter(e=>e.id!==id);save();if(typeof sbRequest==='function')sbRequest('/entries?id=eq.'+encodeURIComponent(id),'DELETE').then(()=>showSyncBadge('Deleted'));renderProp();}
+function deleteProp(id){if(!confirm('Delete this property and all its data?'))return;const eids=S.entries.filter(e=>e.propId===id).map(e=>e.id);S.properties=S.properties.filter(p=>p.id!==id);S.entries=S.entries.filter(e=>e.propId!==id);if(S.activePropId===id)S.activePropId=null;save();if(typeof sbRequest==='function'){sbRequest('/properties?id=eq.'+encodeURIComponent(id),'DELETE');eids.forEach(eid=>sbRequest('/entries?id=eq.'+encodeURIComponent(eid),'DELETE'));showSyncBadge('Deleted');}renderSidebar();showOverview();}
 
 /* ── Export ── */
 function openExportModal(){
@@ -1495,21 +1518,6 @@ async function sbRequest(path, method='GET', body=null) {
   }
 }
 
-// Save a single property to cloud
-async function cloudSaveProp(p) {
-  await sbRequest('/properties', 'POST', { id: p.id, data: p });
-}
-
-// Save a single entry to cloud
-async function cloudSaveEntry(e) {
-  await sbRequest('/entries', 'POST', { id: e.id, prop_id: e.propId, data: e });
-}
-
-// Delete from cloud
-async function cloudDelete(table, id) {
-  await sbRequest('/' + table + '?id=eq.' + encodeURIComponent(id), 'DELETE');
-}
-
 // Load everything from cloud and refresh UI
 async function cloudLoad() {
   const [props, ents] = await Promise.all([
@@ -1535,60 +1543,7 @@ function showSyncBadge(msg, ok=true) {
   if(ok) el._t = setTimeout(() => el.style.opacity='0', 3000);
 }
 
-// Patch save() — still saves to localStorage AND pushes changed item to cloud
-const _origSave = save;
-function save() { _origSave(); }
-
-// Patch saveProperty to also push to cloud
-const _origSaveProperty = saveProperty;
-function saveProperty() {
-  // Run original (adds to S.properties, closes modal, renders)
-  _origSaveProperty();
-  // Push newly added property to cloud
-  const p = S.properties[S.properties.length - 1];
-  if(p) cloudSaveProp(p).then(() => showSyncBadge('Saved'));
-}
-
-// Patch saveEntry to also push to cloud
-const _origSaveEntry = saveEntry;
-function saveEntry() {
-  _origSaveEntry();
-  // Push new entries (last ones added)
-  S.entries.slice(-10).forEach(e => cloudSaveEntry(e));
-  showSyncBadge('Saved');
-}
-
-// Patch saveSettings to push updated property
-const _origSaveSettings = saveSettings;
-function saveSettings() {
-  _origSaveSettings();
-  const p = prop();
-  if(p) cloudSaveProp(p).then(() => showSyncBadge('Saved'));
-}
-
-// Patch delEntry
-function delEntry(id) {
-  if(!confirm('Delete this entry?')) return;
-  S.entries = S.entries.filter(e => e.id !== id);
-  _origSave();
-  cloudDelete('entries', id).then(() => showSyncBadge('Deleted'));
-  renderProp();
-}
-
-// Patch deleteProp
-function deleteProp(id) {
-  if(!confirm('Delete this property and all its data?')) return;
-  const entryIds = S.entries.filter(e => e.propId === id).map(e => e.id);
-  S.properties = S.properties.filter(p => p.id !== id);
-  S.entries = S.entries.filter(e => e.propId !== id);
-  if(S.activePropId === id) S.activePropId = null;
-  _origSave();
-  cloudDelete('properties', id);
-  entryIds.forEach(eid => cloudDelete('entries', eid));
-  showSyncBadge('Deleted');
-  renderSidebar();
-  showOverview();
-}
+// Cloud saves are now handled directly inside each function above
 
 // Startup: load from cloud, then poll every 8s for teammate changes
 let _cloudSnapshot = '';
