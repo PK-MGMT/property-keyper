@@ -481,7 +481,7 @@
       </div>
       <div class="fg full">
         <label>Contact email (optional)</label>
-        <input type="text" id="exp-email" placeholder="hello@hostier.co.uk" />
+        <input type="text" id="exp-email" placeholder="hello@propertykeyper.co.uk" />
       </div>
     </div>
     <div class="modal-actions">
@@ -1416,16 +1416,21 @@ function generateReport(){
     ${contactHtml}
   </div>`;
 
-  // Close modal first so it doesn't appear on the printed page
-  closeExportModal();
+  // Hide app, show print area, then print
   const pa=document.getElementById('print-area');
+  const app=document.querySelector('.app');
+  const modal=document.getElementById('export-modal');
+  modal.classList.remove('open');
+  app.style.display='none';
   pa.style.display='block';
-  document.querySelector('.app').style.display='none';
-  setTimeout(()=>{
-    window.print();
-    pa.style.display='none';
-    document.querySelector('.app').style.display='flex';
-  }, 120);
+  // Use requestAnimationFrame to ensure DOM updates before print dialog
+  requestAnimationFrame(()=>{
+    requestAnimationFrame(()=>{
+      window.print();
+      pa.style.display='none';
+      app.style.display='flex';
+    });
+  });
 }
 
 document.querySelectorAll('.overlay').forEach(el=>{
