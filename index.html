@@ -817,13 +817,12 @@ function renderProp(){
 
   for(let m=0;m<12;m++){
     const d=calcMonth(p.id,m,year);
-    tI+=d.income;tS+=d.stays;tC+=d.payout;tM+=d.managerProfit;
+    tI+=d.income;tS+=d.stays;tC+=(d.payout-(d.stays*(p.cleanRate||85)));tM+=d.managerProfit;
     if(!d.entries.length)continue;
 
     const incRows=d.incEntries.map(e=>{
       const cat = e.category||'booking';
       const catLabel = INCOME_CATS[cat]?.label || 'Booking';
-      // Detail = platform for bookings, sub-type for upsells, sub for others
       const sub = (e.incomeLines&&e.incomeLines[0]?.sub)||'';
       const detail = cat==='booking' ? e.platform : sub;
       const notes = (e.incomeLines&&e.incomeLines[0]?.name)||'';
@@ -832,12 +831,12 @@ function renderProp(){
         <td><span class="badge badge-direct">${catLabel}</span></td>
         <td style="color:var(--text-2);font-size:12px;text-align:center;font-family:var(--font)">${detail}${noteStr}</td>
         <td style="text-align:right;font-family:var(--mono);font-size:12.5px" class="pos">${fmt(e.income)}</td>
-        <td></td><td></td><td></td><td></td>
+        <td></td><td></td><td></td>
         <td style="text-align:center"><button class="del-btn" onclick="delEntry('${e.id}')"><i class="fas fa-trash-can"></i></button></td>
       </tr>`;
     }).join('');
 
-    // Manual expense entry rows — each line item as its own row
+    // Manual expense entry rows
     const expRows=d.expEntries.map(e=>{
       const lines=[...(e.expenseLines||[{name:'Cleaning & linen',amt:e.cleaning,cat:'cleaning',catLabel:'Cleaning & Linen',sub:'Standard clean'}])].filter(x=>x.amt>0);
       return lines.map((x,i)=>{
@@ -848,11 +847,23 @@ function renderProp(){
           <td style="color:var(--text-2);font-size:12px;text-align:center;font-family:var(--font)">${detail}</td>
           <td></td>
           <td style="text-align:right;font-family:var(--mono);font-size:12.5px" class="neg">${fmt(x.amt)}</td>
-          <td></td><td></td><td></td>
+          <td></td><td></td>
           <td style="text-align:center">${i===0?`<button class="del-btn" onclick="delEntry('${e.id}')"><i class="fas fa-trash-can"></i></button>`:''}</td>
         </tr>`;
       }).join('');
     }).join('');
+
+    // Auto cleaning row — stays × cleanRate from settings
+    const cleanRate = p.cleanRate || 85;
+    const cleanTotal = d.stays * cleanRate;
+    const cleaningRow = d.stays > 0 ? `<tr style="background:rgba(232,113,74,0.04)">
+      <td><span class="badge badge-late">Cleaning &amp; Linen</span></td>
+      <td style="color:var(--text-2);font-size:12px;text-align:center;font-family:var(--font)">Standard clean × ${d.stays}</td>
+      <td></td>
+      <td style="text-align:right;font-family:var(--mono);font-size:12.5px" class="neg">${fmt(cleanTotal)}</td>
+      <td></td><td></td>
+      <td></td>
+    </tr>` : '';
 
     // Recurring expense rows from Settings
     const recurringRows=(p.expenses||[]).filter(ex=>ex.qty*ex.unitCost>0&&d.entries.length>0).map(ex=>`<tr style="background:rgba(232,113,74,0.03)">
@@ -860,7 +871,7 @@ function renderProp(){
       <td style="color:var(--text-2);font-size:12px;text-align:center;font-family:var(--font)">${ex.name}</td>
       <td></td>
       <td style="text-align:right;font-family:var(--mono);font-size:12.5px" class="neg">${fmt(ex.qty*ex.unitCost)}</td>
-      <td></td><td></td><td></td>
+      <td></td><td></td>
       <td></td>
     </tr>`).join('');
 
@@ -870,7 +881,7 @@ function renderProp(){
     html+=`<div class="tbl-wrap">
       <div class="tbl-head">
         <div><span class="tbl-head-title">${MFULL[m]} ${year}</span><span class="tbl-head-sub" style="margin-left:8px">${d.stays} stay${d.stays!==1?'s':''}</span></div>
-        <span class="${pc(d.payout)}" style="font-size:13px;font-weight:600">${fmt(d.payout)} payout</span>
+        <span class="${pc(d.payout - cleanTotal)}" style="font-size:13px;font-weight:600">${fmt(d.payout - cleanTotal)} payout</span>
       </div>
       <table style="table-layout:fixed;width:100%">
         <thead><tr>
@@ -883,13 +894,13 @@ function renderProp(){
           <th style="width:4%"></th>
         </tr></thead>
         <tbody>
-          ${incRows}${expRows}${recurringRows}
+          ${incRows}${expRows}${cleaningRow}${recurringRows}
           <tr class="tr-total">
             <td>Total</td><td></td>
             <td>${fmt(d.income)}</td>
-            <td>${fmt(d.totalExpenses)}</td>
+            <td>${fmt(d.totalExpenses + cleanTotal)}</td>
             <td>${fmt(d.commission)}</td>
-            <td class="${pc(d.payout)}">${fmt(d.payout)}</td>
+            <td class="${pc(d.payout - cleanTotal)}">${fmt(d.payout - cleanTotal)}</td>
             <td></td>
           </tr>
         </tbody>
